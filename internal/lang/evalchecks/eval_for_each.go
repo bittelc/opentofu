@@ -121,7 +121,7 @@ func EvaluateForEachExpressionValue(expr hcl.Expression, ctx ContextFunc, allowU
 		return nullMap, diags
 	}
 
-	forEachVal, diags = performForEachValueChecks(expr, hclCtx, allowUnknown, forEachVal, allowedTypesMessage, excludableAddr)
+	forEachVal, diags = performForEachValueChecks(expr, hclCtx, allowUnknown, allowedTypesMessage, forEachVal, excludableAddr) // He just switched the argument positions here, no other changes
 	if diags.HasErrors() {
 		return forEachVal, diags
 	}
@@ -130,12 +130,92 @@ func EvaluateForEachExpressionValue(expr hcl.Expression, ctx ContextFunc, allowU
 }
 
 // performForEachValueChecks ensures the for_each argument is valid
-func performForEachValueChecks(expr hcl.Expression, hclCtx *hcl.EvalContext, allowUnknown bool, forEachVal cty.Value, allowedTypesMessage string, excludableAddr addrs.Targetable) (cty.Value, tfdiags.Diagnostics) {
+func performForEachValueChecks(expr hcl.Expression, hclCtx *hcl.EvalContext, allowUnknown bool, allowedTypesMessage string, forEachVal cty.Value, excludableAddr addrs.Targetable) (cty.Value, tfdiags.Diagnostics) { // He just switched the argument positions here, no other changes
+
+	// Simplify this function by moving the checks into seperate functions
+	if forEachVal.IsKnown() {
+		return performForEachValueChecksKnown(expr, hclCtx, allowUnknown, allowedTypesMessage, forEachVal, excludableAddr)
+	}
+	return performForEachValueChecksUnknown(expr, hclCtx, allowUnknown, allowedTypesMessage, forEachVal, excludableAddr)
+
+	/*
+		Move all this into seperate functions.
+		All the below code is moved into performForEachValueChecksKnown
+
+		var diags tfdiags.Diagnostics
+		nullMap := cty.NullVal(cty.Map(cty.DynamicPseudoType))
+		ty := forEachVal.Type()
+
+		switch {
+		case forEachVal.IsNull():
+			diags = diags.Append(&hcl.Diagnostic{
+				Severity:    hcl.DiagError,
+				Summary:     "Invalid for_each argument",
+				Detail:      fmt.Sprintf(`The given "for_each" argument value is unsuitable: the given "for_each" argument value is null. A %s is allowed.`, allowedTypesMessage),
+				Subject:     expr.Range().Ptr(),
+				Expression:  expr,
+				EvalContext: hclCtx,
+			})
+			return nullMap, diags
+		case !forEachVal.IsKnown():
+			if !allowUnknown {
+				var detailMsg string
+				switch {
+				case ty.IsSetType():
+					detailMsg = errInvalidUnknownDetailSet
+				default:
+					detailMsg = errInvalidUnknownDetailMap
+				}
+				detailMsg += forEachCommandLineExcludeSuggestion(excludableAddr)
+
+				diags = diags.Append(&hcl.Diagnostic{
+					Severity:    hcl.DiagError,
+					Summary:     "Invalid for_each argument",
+					Detail:      detailMsg,
+					Subject:     expr.Range().Ptr(),
+					Expression:  expr,
+					EvalContext: hclCtx,
+					Extra:       DiagnosticCausedByUnknown(true),
+				})
+			}
+			// ensure that we have a map, and not a DynamicValue
+			return cty.UnknownVal(cty.Map(cty.DynamicPseudoType)), diags
+		case markSafeLengthInt(forEachVal) == 0:
+			// If the map is empty ({}), return an empty map, because cty will
+			// return nil when representing {} AsValueMap. This also covers an empty
+			// set (toset([]))
+			return forEachVal, diags
+		}
+
+		if ty.IsSetType() {
+			setVal, setTypeDiags := performSetTypeChecks(expr, hclCtx, allowUnknown, forEachVal, excludableAddr)
+			diags = diags.Append(setTypeDiags)
+			if diags.HasErrors() {
+				return setVal, diags
+			}
+		}
+
+		return forEachVal, diags
+
+	*/
+}
+
+// New functinon, but code just moved from performForEachValueChecks into here, mostly
+func performForEachValueChecksKnown(expr hcl.Expression, hclCtx *hcl.EvalContext, allowUnknown bool, allowedTypesMessage string, forEachVal cty.Value, excludableAddr addrs.Targetable) (cty.Value, tfdiags.Diagnostics) {
+
 	var diags tfdiags.Diagnostics
-	nullMap := cty.NullVal(cty.Map(cty.DynamicPseudoType))
+	// nullMap := cty.NullVal(cty.Map(cty.DynamicPseudoType)) Deleted this because this variable only used once, now that subfunctions are created
 	ty := forEachVal.Type()
 
 	switch {
+
+	/* A value can be known, and it can also be known to be Null, eg:
+	variable "example" {
+	  type    = string
+	  default = null
+	}
+	If it's null, then that's a problem, because the for loop would iterate 0 times.
+	*/
 	case forEachVal.IsNull():
 		diags = diags.Append(&hcl.Diagnostic{
 			Severity:    hcl.DiagError,
@@ -145,30 +225,37 @@ func performForEachValueChecks(expr hcl.Expression, hclCtx *hcl.EvalContext, all
 			Expression:  expr,
 			EvalContext: hclCtx,
 		})
-		return nullMap, diags
-	case !forEachVal.IsKnown():
-		if !allowUnknown {
-			var detailMsg string
-			switch {
-			case ty.IsSetType():
-				detailMsg = errInvalidUnknownDetailSet
-			default:
-				detailMsg = errInvalidUnknownDetailMap
-			}
-			detailMsg += forEachCommandLineExcludeSuggestion(excludableAddr)
 
-			diags = diags.Append(&hcl.Diagnostic{
-				Severity:    hcl.DiagError,
-				Summary:     "Invalid for_each argument",
-				Detail:      detailMsg,
-				Subject:     expr.Range().Ptr(),
-				Expression:  expr,
-				EvalContext: hclCtx,
-				Extra:       DiagnosticCausedByUnknown(true),
-			})
-		}
-		// ensure that we have a map, and not a DynamicValue
-		return cty.UnknownVal(cty.Map(cty.DynamicPseudoType)), diags
+		// Just replace the variable with the actual function it calls, because it's only used once
+		// return nullMap, diags
+		return cty.NullVal(cty.Map(cty.DynamicPseudoType)), diags
+
+	// Deleted, because we already know that Value isKnown(), That's how we got into this function.
+	// case !forEachVal.IsKnown():
+	// 	if !allowUnknown {
+	// 		var detailMsg string
+	// 		switch {
+	// 		case ty.IsSetType():
+	// 			detailMsg = errInvalidUnknownDetailSet
+	// 		default:
+	// 			detailMsg = errInvalidUnknownDetailMap
+	// 		}
+	// 		detailMsg += forEachCommandLineExcludeSuggestion(excludableAddr)
+
+	// 		diags = diags.Append(&hcl.Diagnostic{
+	// 			Severity:    hcl.DiagError,
+	// 			Summary:     "Invalid for_each argument",
+	// 			Detail:      detailMsg,
+	// 			Subject:     expr.Range().Ptr(),
+	// 			Expression:  expr,
+	// 			EvalContext: hclCtx,
+	// 			Extra:       DiagnosticCausedByUnknown(true),
+	// 		})
+	// 	}
+	// 	// ensure that we have a map, and not a DynamicValue
+	// 	return cty.UnknownVal(cty.Map(cty.DynamicPseudoType)), diags
+
+	// Still need to check if the map is empty, even though the Value is known
 	case markSafeLengthInt(forEachVal) == 0:
 		// If the map is empty ({}), return an empty map, because cty will
 		// return nil when representing {} AsValueMap. This also covers an empty
