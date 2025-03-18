@@ -230,37 +230,53 @@ func performForEachValueChecksKnown(expr hcl.Expression, hclCtx *hcl.EvalContext
 		// return nullMap, diags
 		return cty.NullVal(cty.Map(cty.DynamicPseudoType)), diags
 
-	// Deleted, because we already know that Value isKnown(), That's how we got into this function.
-	// case !forEachVal.IsKnown():
-	// 	if !allowUnknown {
-	// 		var detailMsg string
-	// 		switch {
-	// 		case ty.IsSetType():
-	// 			detailMsg = errInvalidUnknownDetailSet
-	// 		default:
-	// 			detailMsg = errInvalidUnknownDetailMap
-	// 		}
-	// 		detailMsg += forEachCommandLineExcludeSuggestion(excludableAddr)
+		// Deleted, because we already know that Value isKnown(), That's how we got into this function.
+		// case !forEachVal.IsKnown():
+		// 	if !allowUnknown {
+		// 		var detailMsg string
+		// 		switch {
+		// 		case ty.IsSetType():
+		// 			detailMsg = errInvalidUnknownDetailSet
+		// 		default:
+		// 			detailMsg = errInvalidUnknownDetailMap
+		// 		}
+		// 		detailMsg += forEachCommandLineExcludeSuggestion(excludableAddr)
 
-	// 		diags = diags.Append(&hcl.Diagnostic{
-	// 			Severity:    hcl.DiagError,
-	// 			Summary:     "Invalid for_each argument",
-	// 			Detail:      detailMsg,
-	// 			Subject:     expr.Range().Ptr(),
-	// 			Expression:  expr,
-	// 			EvalContext: hclCtx,
-	// 			Extra:       DiagnosticCausedByUnknown(true),
-	// 		})
-	// 	}
-	// 	// ensure that we have a map, and not a DynamicValue
-	// 	return cty.UnknownVal(cty.Map(cty.DynamicPseudoType)), diags
+		// 		diags = diags.Append(&hcl.Diagnostic{
+		// 			Severity:    hcl.DiagError,
+		// 			Summary:     "Invalid for_each argument",
+		// 			Detail:      detailMsg,
+		// 			Subject:     expr.Range().Ptr(),
+		// 			Expression:  expr,
+		// 			EvalContext: hclCtx,
+		// 			Extra:       DiagnosticCausedByUnknown(true),
+		// 		})
+		// 	}
+		// 	// ensure that we have a map, and not a DynamicValue
+		// 	return cty.UnknownVal(cty.Map(cty.DynamicPseudoType)), diags
 
-	// Still need to check if the map is empty, even though the Value is known
-	case markSafeLengthInt(forEachVal) == 0:
-		// If the map is empty ({}), return an empty map, because cty will
-		// return nil when representing {} AsValueMap. This also covers an empty
-		// set (toset([]))
-		return forEachVal, diags
+		// Still need to check if the map is empty, even though the Value is known
+		// But I can't figure out why the diags is not set. Why don't we set the diags context extensively,
+		// in the same way that we did with forEachVal.IsNull()?
+		// If I rewrite the PR, add in a diags and see if that changes anything.
+		// Actually, I think I understand. It's because we don't want to error on this! If the map is
+		// empty (but not null (what's the difference?)), then we allow the plan/apply to plan for 0
+		// resources to exist.
+		// And actually again, I don't understand, or I disagree with the below code. If I remove it entirely,
+		// the tests still passs. Additionally, if I do a `plan` with a variable like:
+		// variable "additional_tags" {
+		//   type        = map(string)
+		//   default     = {}
+		//   description = "(Optional) List of extra tags"
+		// }
+		// it plans and applies successfully (destroying, in my tests).
+		// Rewrite the PR to delete this code.
+		//
+		// case markSafeLengthInt(forEachVal) == 0:
+		// 	// If the map is empty ({}), return an empty map, because cty will
+		// 	// return nil when representing {} AsValueMap. This also covers an empty
+		// 	// set (toset([]))
+		// 	return forEachVal, diags
 	}
 
 	if ty.IsSetType() {
@@ -275,9 +291,24 @@ func performForEachValueChecksKnown(expr hcl.Expression, hclCtx *hcl.EvalContext
 }
 
 // performSetTypeChecks does checks when we have a Set type, as sets have some gotchas
+// TODO, explain gotchas a bit more, either here or in comments in the function.
 func performSetTypeChecks(expr hcl.Expression, hclCtx *hcl.EvalContext, allowUnknown bool, forEachVal cty.Value, excludableAddr addrs.Targetable) (cty.Value, tfdiags.Diagnostics) {
 	var diags tfdiags.Diagnostics
 	ty := forEachVal.Type()
+
+	// This was moved upward in the function, not exactly sure why. But it also
+	// added the `&& ty.ElementType() != cty.DynamicPseudoType`. So somehow this helps
+	// to reject bad sets.
+	if ty.ElementType() != cty.String && ty.ElementType() != cty.DynamicPseudoType {
+		diags = diags.Append(&hcl.Diagnostic{
+			Severity:    hcl.DiagError,
+			Summary:     "Invalid for_each set argument",
+			Detail:      fmt.Sprintf(`The given "for_each" argument value is unsuitable: "for_each" supports sets of strings, but you have provided a set containing type %s.`, forEachVal.Type().ElementType().FriendlyName()),
+			Subject:     expr.Range().Ptr(),
+			Expression:  expr,
+			EvalContext: hclCtx,
+		})
+	}
 
 	// since we can't use a set values that are unknown, we treat the
 	// entire set as unknown
@@ -294,18 +325,6 @@ func performSetTypeChecks(expr hcl.Expression, hclCtx *hcl.EvalContext, allowUnk
 			})
 		}
 		return cty.UnknownVal(ty), diags
-	}
-
-	if ty.ElementType() != cty.String {
-		diags = diags.Append(&hcl.Diagnostic{
-			Severity:    hcl.DiagError,
-			Summary:     "Invalid for_each set argument",
-			Detail:      fmt.Sprintf(`The given "for_each" argument value is unsuitable: "for_each" supports sets of strings, but you have provided a set containing type %s.`, forEachVal.Type().ElementType().FriendlyName()),
-			Subject:     expr.Range().Ptr(),
-			Expression:  expr,
-			EvalContext: hclCtx,
-		})
-		return cty.NullVal(ty), diags
 	}
 
 	// A set of strings may contain null, which makes it impossible to

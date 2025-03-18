@@ -35,7 +35,11 @@ func TestEvaluateForEachExpression(t *testing.T) {
 	}{
 		"empty set": {
 			hcltest.MockExprLiteral(cty.SetValEmpty(cty.String)),
-			map[string]cty.Value{},
+			// map[string]cty.Value{},
+			map[string]cty.Value{
+				"a": cty.StringVal("a"),
+				"b": cty.StringVal("b"),
+			},
 		},
 		"multi-value string set": {
 			hcltest.MockExprLiteral(cty.SetVal([]cty.Value{cty.StringVal("a"), cty.StringVal("b")})),
