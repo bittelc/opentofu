@@ -188,6 +188,10 @@ func TestNodeApplyableOutputExecute_sensitiveValueAndOutput(t *testing.T) {
 	}
 }
 
+func TestNodeSensitiveValueChange(t *testing.T) {
+
+}
+
 func TestNodeDestroyableOutputExecute(t *testing.T) {
 	outputAddr := addrs.OutputValue{Name: "foo"}.Absolute(addrs.RootModuleInstance)
 
