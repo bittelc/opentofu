@@ -189,6 +189,15 @@ func TestNodeApplyableOutputExecute_sensitiveValueAndOutput(t *testing.T) {
 }
 
 func TestNodeSensitiveValueChange(t *testing.T) {
+	ctx := new(MockEvalContext)
+	ctx.StateState = states.NewState().SyncWrapper()
+	ctx.ChecksState = checks.NewState(nil)
+
+	// config := &configs.Output{
+	// 	Name:         "map-output",
+	// 	Sensitive:    true,
+	// 	IsOverridden: true,
+	// }
 	if got, want := "", "Warning: Previously sensitive output variable is now made insensitive."; !strings.Contains(got, want) {
 		t.Errorf("sensitivity warning not respected\n got: %#v\nwant: %#v", got, want)
 	}
