@@ -624,15 +624,65 @@ func MarshalOutputChanges(changes *plans.Changes) (map[string]Change, error) {
 			}
 		}
 
-		// The only information we have in the plan about output sensitivity is
-		// a boolean which is true if the output was or is marked sensitive. As
-		// a result, BeforeSensitive and AfterSensitive will be identical, and
-		// either false or true.
-		outputSensitive := cty.False
-		if oc.Sensitive {
-			outputSensitive = cty.True
+		// oc.Sensitive is the sensitivity status of the output after the change.
+		// We need to determine the before/after sensitivity states separately.
+		beforeSensitive := cty.False
+		afterSensitive := cty.False
+
+		// For both new (Create) and deleted (Delete) outputs, we can determine 
+		// the sensitivity directly
+		if oc.Action == plans.Create {
+			// New outputs: before sensitivity is always false
+			beforeSensitive = cty.False
+			if oc.Sensitive {
+				afterSensitive = cty.True
+			}
+		} else if oc.Action == plans.Delete {
+			// Deleted outputs: after sensitivity is always false
+			afterSensitive = cty.False
+			// If the output was deleted and had Action=Delete, we need to check
+			// if it was previously sensitive from the oc.Sensitive value
+			if oc.Sensitive {
+				beforeSensitive = cty.True
+			}
+		} else {
+			// For updates, we need to infer the sensitivity change
+			// If the action is Update but the values are the same,
+			// then the sensitivity must have changed
+			if oc.Action == plans.Update && 
+				changeV.Before != cty.NilVal && 
+				changeV.After != cty.NilVal {
+					
+				// Check if values are equal (ignoring sensitivity marks)
+				beforeVal, _ := changeV.Before.UnmarkDeep()
+				afterVal, _ := changeV.After.UnmarkDeep()
+				
+				if beforeVal.Equals(afterVal).True() {
+					// If values are the same, the sensitivity changed
+					beforeSensitive = cty.BoolVal(!oc.Sensitive)
+					afterSensitive = cty.BoolVal(oc.Sensitive)
+				} else {
+					// For regular value changes, use the oc.Sensitive for both
+					if oc.Sensitive {
+						beforeSensitive = cty.True
+						afterSensitive = cty.True
+					}
+				}
+			} else {
+				// For other cases, use the oc.Sensitive for both
+				if oc.Sensitive {
+					beforeSensitive = cty.True
+					afterSensitive = cty.True
+				}
+			}
 		}
-		sensitive, err := ctyjson.Marshal(outputSensitive, outputSensitive.Type())
+
+		bSensitive, err := ctyjson.Marshal(beforeSensitive, beforeSensitive.Type())
+		if err != nil {
+			return nil, err
+		}
+		
+		aSensitive, err := ctyjson.Marshal(afterSensitive, afterSensitive.Type())
 		if err != nil {
 			return nil, err
 		}
@@ -644,8 +694,8 @@ func MarshalOutputChanges(changes *plans.Changes) (map[string]Change, error) {
 			Before:          json.RawMessage(before),
 			After:           json.RawMessage(after),
 			AfterUnknown:    a,
-			BeforeSensitive: json.RawMessage(sensitive),
-			AfterSensitive:  json.RawMessage(sensitive),
+			BeforeSensitive: json.RawMessage(bSensitive),
+			AfterSensitive:  json.RawMessage(aSensitive),
 
 			// Just to be explicit, outputs cannot be imported so this is always
 			// nil.
