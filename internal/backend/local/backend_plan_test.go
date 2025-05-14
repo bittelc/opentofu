@@ -251,36 +251,36 @@ func TestLocal_planOutputSensitivityChanged(t *testing.T) {
 			Module:      addrs.RootModuleInstance,
 			OutputValue: addrs.OutputValue{Name: "sensitive_after"},
 		}, cty.StringVal("after"), false) // starts non-sensitive
-		
+
 		// Output that will become non-sensitive
 		ss.SetOutputValue(addrs.AbsOutputValue{
 			Module:      addrs.RootModuleInstance,
 			OutputValue: addrs.OutputValue{Name: "sensitive_before"},
-		}, cty.StringVal("after"), true) // starts sensitive
-		
+		}, cty.StringVal("before"), true) // starts sensitive
+
 		// Outputs that remain unchanged
 		ss.SetOutputValue(addrs.AbsOutputValue{
 			Module:      addrs.RootModuleInstance,
-			OutputValue: addrs.OutputValue{Name: "unchanged"},
-		}, cty.StringVal("before"), false)
-		
+			OutputValue: addrs.OutputValue{Name: "unchanged_insensitive"},
+		}, cty.StringVal("unchanged"), false)
+
 		// Outputs with actual value changes (for control comparison)
 		ss.SetOutputValue(addrs.AbsOutputValue{
 			Module:      addrs.RootModuleInstance,
-			OutputValue: addrs.OutputValue{Name: "changed"},
-		}, cty.StringVal("before"), false)
+			OutputValue: addrs.OutputValue{Name: "changed_insensitive"},
+		}, cty.StringVal("changed_but_always_insenstive"), false)
 	}))
-	
+
 	outDir := t.TempDir()
-	defer os.RemoveAll(outDir)
-	planPath := filepath.Join(outDir, "plan.tfplan")
-	
+	defer os.RemoveAll(outDir) // Likely don't need, but will delete once reviewer agrees
+	planPath := filepath.Join(outDir, "sensitivity_plan_test.tfplan")
+
 	// Use the test fixture with sensitivity changes
 	op, configCleanup, done := testOperationPlan(t, "./testdata/plan-outputs-sensitivity-changed")
 	defer configCleanup()
 	op.PlanRefresh = true
 	op.PlanOutPath = planPath
-	
+
 	cfg := cty.ObjectVal(map[string]cty.Value{
 		"path": cty.StringVal(b.StatePath),
 	})
@@ -293,7 +293,7 @@ func TestLocal_planOutputSensitivityChanged(t *testing.T) {
 		Type:   "local",
 		Config: cfgRaw,
 	}
-	
+
 	run, err := b.Operation(context.Background(), op)
 	if err != nil {
 		t.Fatalf("bad: %s", err)
@@ -319,7 +319,7 @@ state, without changing any real infrastructure.
 `)
 
 	if output := done(t).Stdout(); !strings.Contains(output, expectedOutput) {
-		t.Errorf("Unexpected output:\n%s\n\nwant output containing:\n%s", output, expectedOutput)
+		t.Errorf("Unexpected output\ngot output:%s\n\nwant output containing:\n%s", output, expectedOutput)
 	}
 }
 
